@@ -167,6 +167,110 @@ simulate_BASH_LMM_data <- function(min_obs_per_indiv,
   ))
 }
 
+BASH_LMM_sample <- function(gamma_ctrl, 
+                            beta_medias, 
+                            retain_rate, 
+                            delay, 
+                            X_ctrl,
+                            N_indivs,
+                            indiv,
+                            priormean_icept,
+                            theta_scale_prior,
+                            y,
+                            beta_0,
+                            X_media,
+                            num_media,
+                            n_iter,
+                            input_stan,
+                            output_dir,
+                            seed
+                            
+){
+  
+  
+  time0 = Sys.time()
+  
+  print("reading STAN file")
+  #poisson LMM 
+  poisson_lmm_debug = stan_model(input_stan)
+  print("sampling begin")
+  options(mc.cores = parallel::detectCores())
+  
+  fit <- sampling(poisson_lmm_debug, 
+                  list(N=nrow(X_ctrl),
+                       num_ctrl=ncol(X_ctrl),
+                       N_indivs=N_indivs,
+                       indiv=indiv,
+                       priormean_icept=priormean_icept,
+                       theta_scale_icept = theta_scale_prior,
+                       y=y,
+                       X_ctrl=X_ctrl,
+                       max_lag = dim(X_media)[3],
+                       num_media=num_media,
+                       X_media=X_media
+                  ), iter=n_iter
+  ) 
+  
+  #summary of selected pararms  
+  selected_summary <- data.frame(summary(fit, pars = c("alpha", "beta","beta_medias","retain_rate","delay"), 
+                                         probs = c(0.1, 0.9))$summary)
+  
+  actual_df <- data.frame(actual = c(beta_0,gamma_ctrl, beta_medias, retain_rate, delay))
+  selected_summary = cbind(actual_df,selected_summary)
+  selected_summary$runtime <- difftime(time0,Sys.time(),units="secs")
+  
+  write.csv(selected_summary,paste0(output_dir,"/summary_table.csv"))
+  saveRDS(fit, paste0(output_dir,"/fit.rds"))
+}
+
+simulate_and_sample_BASH_poisson <- function(input_params){
+  
+  set.seed(input_params$seed)
+  dir.create(input_params$output_dir)
+  write.csv(unlist(input_params),paste0(input_params$output_dir,"/input_params.csv"))
+  
+  BASH_sim_data = simulate_BASH_LMM_data(min_obs_per_indiv=input_params$min_obs_per_indiv,
+                                         max_obs_per_indiv=input_params$max_obs_per_indiv,
+                                         prob_confounder1=input_params$prob_confounder1,
+                                         cra_rate=input_params$cra_rate,
+                                         msl_rate=input_params$msl_rate,
+                                         N=input_params$N,
+                                         beta_0=input_params$beta_0,
+                                         beta_cra=input_params$beta_cra,
+                                         beta_msl=input_params$beta_msl,
+                                         beta_time=input_params$beta_time,
+                                         beta_US=input_params$beta_US,
+                                         sd_noise=input_params$sd_noise,
+                                         cra_delay=input_params$cra_delay,
+                                         msl_delay=input_params$msl_delay,
+                                         cra_retain_rate=input_params$cra_retain_rate, 
+                                         msl_retain_rate=input_params$msl_retain_rate,
+                                         theta_scale_prior=input_params$theta_scale_prior,
+                                         max_lag=input_params$max_lag,
+                                         individual_sd=input_params$individual_sd,
+                                         output_dir=input_params$output_dir)
+  
+  
+  fit <- BASH_LMM_sample( gamma_ctrl=BASH_sim_data$gamma_ctrl, 
+                          beta_medias=BASH_sim_data$beta_medias, 
+                          retain_rate=BASH_sim_data$retain_rate, 
+                          delay=BASH_sim_data$delay, 
+                          X_ctrl=BASH_sim_data$X_ctrl,
+                          N_indivs=BASH_sim_data$N_indivs,
+                          indiv=BASH_sim_data$indiv,
+                          priormean_icept=input_params$priormean_icept,
+                          theta_scale_prior=input_params$theta_scale_prior,
+                          y=BASH_sim_data$Y,
+                          beta_0=input_params$beta_0,
+                          X_media=BASH_sim_data$X_media,
+                          num_media=BASH_sim_data$num_media,
+                          n_iter=input_params$n_iter,
+                          input_stan=input_params$input_stan,
+                          output_dir=input_params$output_dir,
+                          seed=input_params$seed)
+  
+  
+}
 
 input_params <- list(min_obs_per_indiv=15,
                      max_obs_per_indiv=400,
@@ -190,5 +294,8 @@ input_params <- list(min_obs_per_indiv=15,
                      individual_sd=0.7,
                      n_iter=2000,
                      seed=9,
-                     input_stan="/BASH_Poisson_LMM_no_hill.stan",
+                     input_stan="BASH_Poisson_LMM_no_hill.stan",
                      output_dir = "simulation_results")
+
+simulate_and_sample_BASH_poisson(input_params)
+
